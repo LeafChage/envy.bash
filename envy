@@ -1,0 +1,295 @@
+#!/bin/bash
+
+set -euo pipefail
+
+RESERVED_SECRET="SECRET"
+# RESERVED_ENCRYPT="ENCRYPT"
+# RESERVED_DECRYPT="DECRYPT"
+
+SUBCOMMAND_ENCRYPT_SHORT="enc"
+SUBCOMMAND_ENCRYPT_LONG="encrypt"
+SUBCOMMAND_DECRYPT_SHORT="dec"
+SUBCOMMAND_DECRYPT_LONG="decrypt"
+SUBCOMMAND_HELP="help"
+SUBCOMMAND_JSON="json"
+
+COLOR_OFF="\033[0m"
+COLOR_RED="\033[0;31m"
+COLOR_GREEN="\033[0;32m"
+
+###
+### util
+###
+
+function reserved_prefix() {
+    echo "#%$1"
+}
+
+function e.standard() {
+    echo -e "${COLOR_RED}ERROR: $1 $COLOR_OFF"
+    echo ""
+    usage
+}
+function e.env_format() { e.standard "Oops, env format is not correct at line: $1"; }
+function e.unexpected_command() { e.standard "Unexpected sub command $1"; }
+function e.unexpected_option() { e.standard "Unexpected option $1"; }
+function e.undefined_argument() { e.standard "you need to set $1"; }
+
+function usage() {
+    echo "envy document encrypt/decrypt tool"
+    echo ""
+    echo "SUBCOMMAND:"
+    echo "  $SUBCOMMAND_HELP    show usage"
+    echo "  $SUBCOMMAND_JSON    convert to json"
+    echo "    ex) envy json .local.env"
+    echo ""
+    echo "SUBCOMMAND:"
+    echo "  $SUBCOMMAND_ENCRYPT_LONG|$SUBCOMMAND_ENCRYPT_SHORT   encrypt file"
+    echo "  $SUBCOMMAND_DECRYPT_LONG|$SUBCOMMAND_DECRYPT_SHORT   decrypt file"
+    echo ""
+    echo "  OPTION:"
+    echo "    -i | --input   [InputFile]"
+    echo "    -k             [KeyString]"
+}
+
+
+###
+### parser
+###
+function p.skip_comment_out() {
+    set +e
+    while read -r line || [ "$line" ]; do
+        # exclude comment out line
+        echo -e "$line" | grep -vE "^(\s*)?#[^%].*$"
+    done
+    set -e
+}
+function p.skip_comment_out_and_reserve() {
+    set +e
+    while read -r line || [ "$line" ] ; do
+        # exclude comment out line
+        echo -e "$line" | grep -vE "^(\s*)?#.*$"
+    done
+    set -e
+}
+function p.skip_space_only() {
+    set +e
+    while read -r line || [ "$line" ] ; do
+        # exclude line only space
+        echo -e "$line" | grep -vE "^\s*$"
+    done
+    set -e
+}
+function p.reserved_word() {
+    set +e
+    while read -r line || [ "$line" ] ; do
+        echo "$line" | grep -oE "^(\s*)?#%[a-zA-Z][a-zA-Z0-9]*$" | cut -c 3-
+    done
+    set -e
+}
+function p.e() {
+    set +e
+    while read -r line || [ "$line" ] ; do
+        echo "$line" | grep -E "^[a-zA-Z][a-zA-Z0-9_]*=.+$"
+    done
+    set -e
+}
+function p.e.value() {
+    set +e
+    while read -r line || [ "$line" ] ; do
+        echo "$line" | p.e | cut -d"=" -f 2-
+    done
+    set -e
+}
+function p.e.key() {
+    set +e
+    while read -r line || [ "$line" ] ; do
+        echo "$line" | p.e | cut -d"=" -f 1
+    done
+    set -e
+}
+
+## encrypt
+function openssl.dec() {
+    password=$1
+    while read -r line || [ "$line" ] ; do
+        echo "$line" | openssl aes-256-cbc -d -base64 -A -k "$password"
+    done
+}
+function openssl.enc() {
+    password=$1
+    while read -r line || [ "$line" ] ; do
+        echo "$line" | openssl aes-256-cbc -e -base64 -A -k "$password"
+    done
+}
+
+###
+### encrypt | decrypt command
+###
+
+function encrypt() {
+    # echo $(reserved_prefix $RESERVED_ENCRYPT)
+    password=$1
+    while read -r line || [ "$line" ] ; do
+        secret=$(echo "$line" | p.reserved_word)
+        if [ "$secret" == "$RESERVED_SECRET" ]; then
+            reserved_prefix "$RESERVED_SECRET"
+
+            read -r line2
+            echo "$(echo "$line2" | p.e.key)=$(echo "$line2" | p.e.value | openssl.enc "$password")"
+        else
+            echo "$line"
+        fi
+
+    done
+}
+
+function decrypt() {
+    # echo $(reserved_prefix $RESERVED_DECRYPT)
+    password=$1
+    while read -r line || [ "$line" ] ; do
+        secret=$(echo "$line" | p.reserved_word)
+        if [ "$secret" == "$RESERVED_SECRET" ]; then
+            reserved_prefix "$RESERVED_SECRET"
+
+            read -r line2
+            echo "$(echo "$line2" | p.e.key)=$(echo "$line2" | p.e.value | openssl.dec "$password")"
+        else
+            echo "$line"
+        fi
+    done
+}
+
+function main() {
+    TYPE="$1"
+    shift
+
+    INPUT=""
+    KEY=""
+    while test $# -ne 0; do
+        case $1 in
+            -i | --input )
+                INPUT="$2"
+                if [[ ! -e "$INPUT"  ]]; then error "this is not file path. $INPUT"; exit 1; fi
+                shift ;;
+            -k )
+                KEY="$2"
+                shift ;;
+            *)
+                e.unexpected_option "$1"
+                exit 1 ;;
+        esac
+
+        shift
+    done
+
+    if [[ -z "$INPUT"  ]]; then e.undefined_argument "input path"; exit 1; fi
+    if [[ -z "$KEY"    ]]; then e.undefined_argument "key"; exit 1; fi
+
+    case "$TYPE" in
+        "$SUBCOMMAND_ENCRYPT_SHORT" | "$SUBCOMMAND_ENCRYPT_LONG" )
+            < "$INPUT" p.skip_comment_out | p.skip_space_only | encrypt "$KEY"
+            ;;
+        "$SUBCOMMAND_DECRYPT_SHORT" | "$SUBCOMMAND_DECRYPT_LONG" )
+            < "$INPUT" p.skip_comment_out | p.skip_space_only | decrypt "$KEY"
+            ;;
+    esac
+}
+
+###
+### json command
+###
+function escape_for_json {
+    while read -r line || [ "$line" ] ; do
+        echo "$line" | sed 's/\\/\\\\/g' | sed 's/\//\\\//g' | sed 's/"/\\"/g'
+    done
+}
+function json() {
+    local values=()
+    while read -r line
+    do
+        key="$(echo "$line" | p.e.key)"
+        value="$(echo "$line" | p.e.value | escape_for_json)"
+        values+=("\"${key}\":\"${value}\"")
+    done
+
+    echo "{ $(
+    IFS=,;
+    echo "${values[*]}"
+    ) }"
+}
+
+function convert() {
+    INPUT="$1"
+    shift
+
+    if [[ -z "$INPUT"  ]]; then e.undefined_argument "input path"; exit 1; fi
+
+    < "$INPUT" p.skip_comment_out_and_reserve | p.skip_space_only | json
+}
+
+function tests() {
+    eq() { if [ "$1" == "$2" ]; then echo -e "${COLOR_GREEN}ok${COLOR_OFF}"; else echo -e "${COLOR_RED}ng $1 / $2 $COLOR_OFF"; fi; }
+    not() { if [ ! "$1" == "$2" ]; then echo -e "${COLOR_GREEN}ok${COLOR_OFF}"; else echo -e "${COLOR_RED}ng $1 / $2 $COLOR_OFF"; fi; }
+    echo "# p.skip_comment_out"
+    eq "$(echo '# hello' | p.skip_comment_out)" ""
+    eq "$(echo 'hello' | p.skip_comment_out)" "hello"
+    eq "$(echo '#% hello' | p.skip_comment_out)" "#% hello"
+    eq "$(echo '#% hello' | p.skip_comment_out_and_reserve)" ""
+    eq "$(echo '   ' | p.skip_space_only)" ""
+    eq "$(echo 'hihihi' | p.skip_space_only)" "hihihi"
+
+    echo "# p.reserved_word"
+    eq "$(echo '#%SECRET' | p.reserved_word)" "SECRET"
+    eq "$(echo '   #%SECRET' | p.reserved_word)" "SECRET"
+    eq "$(echo '#%SECRET..' | p.reserved_word)" ""
+    eq "$(echo '#%SECRET  ' | p.reserved_word)" "SECRET"
+    eq "$(echo '#%HELLO WORLD  ' | p.reserved_word)" ""
+
+    echo "# p.e"
+    eq "$(echo 'HELLO=WORLD' | p.e)" "HELLO=WORLD"
+    eq "$(echo 'HELLO124=VALUE' | p.e)" "HELLO124=VALUE"
+    eq "$(echo '123HELLO=VALUE' | p.e)" ""
+    eq "$(echo '::aaa=KEY' | p.e)" ""
+
+    echo "# p.e.value"
+    eq "$(echo 'HELLO=WORLD' | p.e.value)" "WORLD"
+    eq "$(echo 'HELLO=WORLD=WORLD=WORLD' | p.e.value)" "WORLD=WORLD=WORLD"
+    eq "$(echo 'HELLO124=VALUE' | p.e.value)" "VALUE"
+    eq "$(echo '123HELLO=VALUE' | p.e.value)" ""
+
+    echo "# p.e.key"
+    eq "$(echo 'HELLO=WORLD' | p.e.key)" "HELLO"
+    eq "$(echo 'HELLO=WORLD=WORLD=WORLD' | p.e.key)" "HELLO"
+    eq "$(echo 'HELLO124=VALUE' | p.e.key)" "HELLO124"
+    eq "$(echo '123HELLO=VALUE' | p.e.key)" ""
+    eq "$(echo 'WITH_UNDERBAR=VALUE' | p.e.key)" "WITH_UNDERBAR"
+
+    echo "# openssl"
+    not "$(echo 'ANYTHING' | openssl.enc "password")" "ANYTHING"
+    eq "$(echo 'ANYTHING' | openssl.enc "password" | openssl.dec "password" )" "ANYTHING"
+}
+
+subcmd="${1:-nothing}"
+case "$subcmd" in
+    "$SUBCOMMAND_ENCRYPT_SHORT" | "$SUBCOMMAND_ENCRYPT_LONG" | "$SUBCOMMAND_DECRYPT_SHORT" | "$SUBCOMMAND_DECRYPT_LONG" )
+        main "${@:1:($#)}"
+        exit 0 ;;
+    "$SUBCOMMAND_JSON" )
+        if [ "$#" -lt "2" ]; then
+            e.undefined_argument "input path"
+            exit 1
+        fi
+        convert "$2"
+        exit 0 ;;
+    "$SUBCOMMAND_HELP" )
+        usage
+        exit 0 ;;
+    "_test_")
+        tests
+        exit 0;;
+    * )
+        e.unexpected_command "$subcmd"
+        exit 1 ;;
+esac
+
