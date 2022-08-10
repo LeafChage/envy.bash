@@ -5,12 +5,14 @@ simple env tool
 ```sh
 $ envy help
 
-envy document encrypt/decrypt tool
+envy utility tool for environment argument
 
 SUBCOMMAND:
   help    show usage
   json    convert to json
     ex) envy json .local.env
+  load    load dotenv file
+    ex) envy load .local.env sh -c 'echo "$PASSWORD"'
 
 SUBCOMMAND:
   encrypt|enc   encrypt file

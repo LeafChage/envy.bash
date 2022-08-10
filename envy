@@ -12,6 +12,7 @@ SUBCOMMAND_DECRYPT_SHORT="dec"
 SUBCOMMAND_DECRYPT_LONG="decrypt"
 SUBCOMMAND_HELP="help"
 SUBCOMMAND_JSON="json"
+SUBCOMMAND_LOAD="load"
 
 COLOR_OFF="\033[0m"
 COLOR_RED="\033[0;31m"
@@ -40,8 +41,12 @@ function usage() {
     echo ""
     echo "SUBCOMMAND:"
     echo "  $SUBCOMMAND_HELP    show usage"
+    echo ""
     echo "  $SUBCOMMAND_JSON    convert to json"
     echo "    ex) envy json .local.env"
+    echo ""
+    echo "  $SUBCOMMAND_LOAD    dotenv file"
+    echo "    ex) envy load .local.env sh -c 'echo \$PASSWORD'"
     echo ""
     echo "SUBCOMMAND:"
     echo "  $SUBCOMMAND_ENCRYPT_LONG|$SUBCOMMAND_ENCRYPT_SHORT   encrypt file"
@@ -213,19 +218,47 @@ function json() {
         values+=("\"${key}\":\"${value}\"")
     done
 
-    echo "{ $(
+    echo "{$(
     IFS=,;
     echo "${values[*]}"
-    ) }"
+    )}"
 }
 
 function convert() {
     INPUT="$1"
     shift
 
-    if [[ -z "$INPUT"  ]]; then e.undefined_argument "input path"; exit 1; fi
+    if [[ ! -e "$INPUT"  ]]; then e.undefined_argument "input path"; exit 1; fi
 
     < "$INPUT" p.skip_comment_out_and_reserve | p.skip_space_only | json
+}
+
+###
+### load envfile command
+###
+function envfile_to_oneline_text() {
+    local values=()
+    while read -r line
+    do
+        values+=("$line")
+    done
+
+    echo "$(
+    IFS=' ';
+    echo "${values[*]}"
+    )"
+}
+
+function load() {
+    INPUT="$1"
+    shift
+
+    if [[ ! -e "$INPUT"  ]]; then e.undefined_argument "input path"; exit 1; fi
+
+    local oneline_env
+    oneline_env=$(< "$INPUT" p.skip_comment_out_and_reserve | p.skip_space_only | envfile_to_oneline_text)
+    # shellcheck disable=SC2086
+    env ${oneline_env} "${@:1:($#)}"
 }
 
 function tests() {
@@ -268,6 +301,20 @@ function tests() {
     echo "# openssl"
     not "$(echo 'ANYTHING' | openssl.enc "password")" "ANYTHING"
     eq "$(echo 'ANYTHING' | openssl.enc "password" | openssl.dec "password" )" "ANYTHING"
+
+    echo "# json"
+    eq "$(json << EOS
+USER=leafchage
+PASSWORD=password
+EOS
+)" '{"USER":"leafchage","PASSWORD":"password"}'
+
+    echo "# envfile_to_oneline_text"
+    eq "$(envfile_to_oneline_text << EOS
+USER=leafchage
+PASSWORD=password
+EOS
+)" "USER=leafchage PASSWORD=password"
 }
 
 subcmd="${1:-nothing}"
@@ -276,11 +323,12 @@ case "$subcmd" in
         main "${@:1:($#)}"
         exit 0 ;;
     "$SUBCOMMAND_JSON" )
-        if [ "$#" -lt "2" ]; then
-            e.undefined_argument "input path"
-            exit 1
-        fi
-        convert "$2"
+        if [ "$#" -lt "2" ]; then e.undefined_argument "input path"; exit 1; fi
+        convert "${@:2:($#)}"
+        exit 0 ;;
+    "$SUBCOMMAND_LOAD" )
+        if [ "$#" -lt "2" ]; then e.undefined_argument "input path"; exit 1; fi
+        load "${@:2:($#)}"
         exit 0 ;;
     "$SUBCOMMAND_HELP" )
         usage
