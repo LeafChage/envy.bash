@@ -1,6 +1,12 @@
 # envy
 simple env tool
 
+## Install
+```
+curl https://raw.githubusercontent.com/LeafChage/envy/main/envy > ./envy
+chmod +x ./envy
+```
+
 ## How to use
 ```sh
 $ envy help
