@@ -269,7 +269,6 @@ function load() {
     if [ "$scanned_path" -ne '1' ]; then e.undefined_argument "cmd"; exit 1; fi
 
     oneline_env=$(cat ${paths[@]} | p.skip_comment_out_and_reserve | p.skip_space_only | envfile_to_oneline_text)
-    echo $oneline_env
 
     # shellcheck disable=SC2086
     env $oneline_env "${@:1:($#)}"
