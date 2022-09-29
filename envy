@@ -37,24 +37,27 @@ function e.unexpected_option() { e.standard "Unexpected option $1"; }
 function e.undefined_argument() { e.standard "you need to set $1"; }
 
 function usage() {
-    echo "envy document encrypt/decrypt tool"
-    echo ""
-    echo "SUBCOMMAND:"
-    echo "  $SUBCOMMAND_HELP    show usage"
-    echo ""
-    echo "  $SUBCOMMAND_JSON    convert to json"
-    echo "    ex) envy json .local.env"
-    echo ""
-    echo "  $SUBCOMMAND_LOAD    dotenv file"
-    echo "    ex) envy load .local.env sh -c 'echo \$PASSWORD'"
-    echo ""
-    echo "SUBCOMMAND:"
-    echo "  $SUBCOMMAND_ENCRYPT_LONG|$SUBCOMMAND_ENCRYPT_SHORT   encrypt file"
-    echo "  $SUBCOMMAND_DECRYPT_LONG|$SUBCOMMAND_DECRYPT_SHORT   decrypt file"
-    echo ""
-    echo "  OPTION:"
-    echo "    -i | --input   [InputFile]"
-    echo "    -k             [KeyString]"
+    cat <<EOF
+envy document encrypt/decrypt tool
+
+SUBCOMMAND:
+  $SUBCOMMAND_HELP    show usage
+
+  $SUBCOMMAND_JSON    convert to json
+    ex) envy json .local.env
+
+  $SUBCOMMAND_LOAD    dotenv file
+    ex) envy load .local.env -- sh -c 'echo \$PASSWORD'
+    ex) envy load .app.env .db.env -- sh -c 'echo \$PASSWORD'
+
+SUBCOMMAND:
+  $SUBCOMMAND_ENCRYPT_LONG|$SUBCOMMAND_ENCRYPT_SHORT   encrypt file
+  $SUBCOMMAND_DECRYPT_LONG|$SUBCOMMAND_DECRYPT_SHORT   decrypt file
+
+  OPTION:
+    -i | --input   [InputFile]
+    -k             [KeyString]
+EOF
 }
 
 
@@ -211,8 +214,7 @@ function escape_for_json {
 }
 function json() {
     local values=()
-    while read -r line
-    do
+    while read -r line; do
         key="$(echo "$line" | p.e.key)"
         value="$(echo "$line" | p.e.value | escape_for_json)"
         values+=("\"${key}\":\"${value}\"")
@@ -228,7 +230,7 @@ function convert() {
     INPUT="$1"
     shift
 
-    if [[ ! -e "$INPUT"  ]]; then e.undefined_argument "input path"; exit 1; fi
+    if [[ ! -f "$INPUT"  ]]; then e.undefined_argument "input path"; exit 1; fi
 
     < "$INPUT" p.skip_comment_out_and_reserve | p.skip_space_only | json
 }
@@ -238,8 +240,7 @@ function convert() {
 ###
 function envfile_to_oneline_text() {
     local values=()
-    while read -r line
-    do
+    while read -r line; do
         values+=("$line")
     done
 
@@ -250,15 +251,28 @@ function envfile_to_oneline_text() {
 }
 
 function load() {
-    INPUT="$1"
-    shift
+    paths=()
+    scanned_path='0'
+    while [ "$#" -ne "0" -a "$scanned_path" = '0' ]; do
+        case $1 in
+            "--" )
+                scanned_path='1'
+                shift
+                ;;
+            *)
+                if [ ! -f "$1"  ]; then e.undefined_argument "input path"; exit 1; fi
+                paths+=("$1")
+                shift
+                ;;
+        esac
+    done
+    if [ "$scanned_path" -ne '1' ]; then e.undefined_argument "cmd"; exit 1; fi
 
-    if [[ ! -e "$INPUT"  ]]; then e.undefined_argument "input path"; exit 1; fi
+    oneline_env=$(cat ${paths[@]} | p.skip_comment_out_and_reserve | p.skip_space_only | envfile_to_oneline_text)
+    echo $oneline_env
 
-    local oneline_env
-    oneline_env=$(< "$INPUT" p.skip_comment_out_and_reserve | p.skip_space_only | envfile_to_oneline_text)
     # shellcheck disable=SC2086
-    env ${oneline_env} "${@:1:($#)}"
+    env $oneline_env "${@:1:($#)}"
 }
 
 function tests() {
@@ -327,7 +341,6 @@ case "$subcmd" in
         convert "${@:2:($#)}"
         exit 0 ;;
     "$SUBCOMMAND_LOAD" )
-        if [ "$#" -lt "2" ]; then e.undefined_argument "input path"; exit 1; fi
         load "${@:2:($#)}"
         exit 0 ;;
     "$SUBCOMMAND_HELP" )

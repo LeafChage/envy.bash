@@ -11,14 +11,17 @@ chmod +x ./envy
 ```sh
 $ envy help
 
-envy utility tool for environment argument
+envy document encrypt/decrypt tool
 
 SUBCOMMAND:
   help    show usage
+
   json    convert to json
     ex) envy json .local.env
-  load    load dotenv file
-    ex) envy load .local.env sh -c 'echo "$PASSWORD"'
+
+  load    dotenv file
+    ex) envy load .local.env -- sh -c 'echo $PASSWORD'
+    ex) envy load .app.env .db.env -- sh -c 'echo $PASSWORD'
 
 SUBCOMMAND:
   encrypt|enc   encrypt file
